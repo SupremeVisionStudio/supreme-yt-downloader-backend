@@ -23,100 +23,129 @@ downloads = {}
 class DownloadManager:
     @staticmethod
     def get_random_user_agent():
-        """Return random user agent to avoid detection"""
+        """Return random user agent"""
         user_agents = [
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0',
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
             'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0',
-            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0',
+            'Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/120.0.6099.119 Mobile/15E148 Safari/604.1',
         ]
         return random.choice(user_agents)
+    
+    @staticmethod
+    def get_ytdlp_opts(for_download=False):
+        """Get yt-dlp options that bypass bot detection"""
+        base_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': False,
+            
+            # CRITICAL: These bypass bot detection
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android', 'ios', 'web'],
+                    'skip': ['configs', 'hls', 'dash'],
+                    'throttled': False,
+                }
+            },
+            
+            # Use alternative extraction methods
+            'youtube_include_dash_manifest': False,
+            'youtube_include_hls_manifest': False,
+            
+            # Important headers to avoid bot detection
+            'http_headers': {
+                'User-Agent': DownloadManager.get_random_user_agent(),
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'DNT': '1',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none',
+                'Sec-Fetch-User': '?1',
+                'Cache-Control': 'max-age=0',
+            },
+            
+            # Bypass geo-restrictions
+            'geo_bypass': True,
+            'geo_bypass_country': 'US',
+            
+            # Retry settings
+            'retries': 20,
+            'fragment_retries': 20,
+            'skip_unavailable_fragments': True,
+            'ignoreerrors': True,
+            
+            # Rate limiting
+            'sleep_interval': random.randint(2, 5),
+            'max_sleep_interval': 10,
+            'sleep_interval_requests': random.randint(3, 7),
+        }
+        
+        if for_download:
+            base_opts.update({
+                'merge_output_format': 'mp4',
+                'extract_flat': 'discard_in_playlist',
+                'noprogress': True,
+                'concurrent_fragment_downloads': 4,
+            })
+            
+        return base_opts
     
     @staticmethod
     def get_video_info(url):
         """Get video information without downloading"""
         try:
-            # Add small delay to mimic human behavior
-            time.sleep(random.uniform(0.5, 2))
+            # Add delay to mimic human
+            time.sleep(random.uniform(1, 3))
             
-            ydl_opts = {
-                'quiet': True,
-                'no_warnings': True,
-                'extract_flat': False,
-                
-                # ANTI-BOT MEASURES (CRITICAL)
-                'http_headers': {
-                    'User-Agent': DownloadManager.get_random_user_agent(),
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                    'Accept-Language': 'en-US,en;q=0.5',
-                    'Accept-Encoding': 'gzip, deflate',
-                    'DNT': '1',
-                    'Connection': 'keep-alive',
-                    'Upgrade-Insecure-Requests': '1',
-                    'Sec-Fetch-Dest': 'document',
-                    'Sec-Fetch-Mode': 'navigate',
-                    'Sec-Fetch-Site': 'none',
-                    'Sec-Fetch-User': '?1',
-                    'Cache-Control': 'max-age=0',
-                },
-                
-                # YouTube specific settings
-                'extractor_args': {
-                    'youtube': {
-                        'player_client': ['android', 'web'],
-                        'player_skip': ['configs'],
-                        'skip': ['hls', 'dash'],
-                    }
-                },
-                
-                # Bypass restrictions
-                'geo_bypass': True,
-                'geo_bypass_country': 'US',
-                
-                # Retry settings
-                'retries': 5,
-                'fragment_retries': 5,
-                'skip_unavailable_fragments': True,
-                
-                # Rate limiting
-                'throttledratelimit': 500000,
-                'sleep_interval_requests': 2,
-                'sleep_interval': 3,
-                'max_sleep_interval': 8,
-            }
+            ydl_opts = DownloadManager.get_ytdlp_opts(for_download=False)
             
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                
-                formats = []
-                for f in info.get('formats', []):
-                    if f.get('vcodec') != 'none' and f.get('acodec') != 'none':
-                        format_info = {
-                            'format_id': f['format_id'],
-                            'quality': f.get('resolution', f.get('format_note', 'Unknown')),
-                            'ext': f.get('ext', 'mp4'),
-                            'filesize': f.get('filesize', 0),
-                            'filesize_fmt': DownloadManager.format_size(f.get('filesize', 0)),
-                            'vcodec': f.get('vcodec', 'unknown'),
-                            'acodec': f.get('acodec', 'unknown')
+            # Try multiple extraction methods
+            for attempt in range(3):
+                try:
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        info = ydl.extract_info(url, download=False)
+                        
+                        formats = []
+                        for f in info.get('formats', []):
+                            if f.get('vcodec') != 'none' and f.get('acodec') != 'none':
+                                format_info = {
+                                    'format_id': f['format_id'],
+                                    'quality': f.get('resolution', f.get('format_note', 'Unknown')),
+                                    'ext': f.get('ext', 'mp4'),
+                                    'filesize': f.get('filesize', 0),
+                                    'filesize_fmt': DownloadManager.format_size(f.get('filesize', 0)),
+                                    'vcodec': f.get('vcodec', 'unknown'),
+                                    'acodec': f.get('acodec', 'unknown')
+                                }
+                                formats.append(format_info)
+                        
+                        # Sort by quality
+                        formats.sort(key=lambda x: DownloadManager.get_quality_value(x['quality']), reverse=True)
+                        
+                        return {
+                            'success': True,
+                            'title': info.get('title', 'Unknown'),
+                            'thumbnail': info.get('thumbnail', ''),
+                            'duration': info.get('duration', 0),
+                            'uploader': info.get('uploader', 'Unknown'),
+                            'view_count': info.get('view_count', 0),
+                            'formats': formats[:15]  # Show more formats
                         }
-                        formats.append(format_info)
-                
-                # Sort by quality
-                formats.sort(key=lambda x: DownloadManager.get_quality_value(x['quality']), reverse=True)
-                
-                return {
-                    'success': True,
-                    'title': info.get('title', 'Unknown'),
-                    'thumbnail': info.get('thumbnail', ''),
-                    'duration': info.get('duration', 0),
-                    'uploader': info.get('uploader', 'Unknown'),
-                    'view_count': info.get('view_count', 0),
-                    'formats': formats[:10]
-                }
-                
+                        
+                except Exception as e:
+                    if attempt < 2:  # Not the last attempt
+                        logger.warning(f"Attempt {attempt + 1} failed: {str(e)[:100]}")
+                        time.sleep(random.uniform(2, 5))
+                        continue
+                    else:
+                        raise e
+                        
         except Exception as e:
             logger.error(f"Error getting video info: {str(e)}")
             return {'success': False, 'error': str(e)}
@@ -181,70 +210,69 @@ class DownloadManager:
                         speed_str = DownloadManager.format_size(speed)
                         downloads[download_id]['message'] = f"Downloading... {speed_str}/s"
             
-            # Download options with anti-bot measures
-            ydl_opts = {
+            # Get download options
+            ydl_opts = DownloadManager.get_ytdlp_opts(for_download=True)
+            ydl_opts.update({
                 'format': format_id,
                 'outtmpl': temp_path,
-                'quiet': True,
-                'no_warnings': True,
                 'progress_hooks': [progress_hook],
                 'merge_output_format': 'mp4',
                 
-                # ANTI-BOT MEASURES
-                'http_headers': {
-                    'User-Agent': DownloadManager.get_random_user_agent(),
-                    'Accept': '*/*',
-                    'Accept-Language': 'en-US,en;q=0.5',
-                    'Accept-Encoding': 'gzip, deflate',
-                    'Connection': 'keep-alive',
-                    'DNT': '1',
-                    'Upgrade-Insecure-Requests': '1',
-                },
-                
+                # Force specific download parameters
                 'extractor_args': {
                     'youtube': {
-                        'player_client': ['android', 'web'],
-                        'skip': ['hls', 'dash'],
+                        'player_client': ['android', 'ios'],
+                        'skip': ['configs', 'hls', 'dash'],
+                        'throttled': False,
+                        'lang': 'en',
                     }
                 },
                 
-                'geo_bypass': True,
-                'geo_bypass_country': 'US',
-                
-                'retries': 10,
-                'fragment_retries': 10,
-                'skip_unavailable_fragments': True,
-                
-                'throttledratelimit': 1000000,
-                'sleep_interval_requests': 1,
-                'sleep_interval': 2,
-                'max_sleep_interval': 5,
-                
-                # Use alternative downloader
+                # Use external downloader if available
                 'external_downloader': 'aria2c',
                 'external_downloader_args': [
                     '--max-connection-per-server=16',
                     '--split=16',
                     '--min-split-size=1M',
+                    '--header=User-Agent: ' + DownloadManager.get_random_user_agent(),
                 ],
-            }
-            
-            # Download
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                filename = DownloadManager.get_safe_filename(info.get('title', 'video'))
-            
-            # Update progress
-            downloads[download_id].update({
-                'status': 'completed',
-                'progress': 100,
-                'message': 'Download complete',
-                'filename': f"{filename}.mp4",
-                'completion_time': time.time()
+                
+                # More aggressive retry settings
+                'retries': 30,
+                'fragment_retries': 30,
+                'retry_sleep_functions': {
+                    'http': lambda n: random.uniform(5, 15),
+                    'fragment': lambda n: random.uniform(2, 8),
+                },
             })
             
-            logger.info(f"Download completed: {download_id}")
-            
+            # Try download with retries
+            for attempt in range(3):
+                try:
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        info = ydl.extract_info(url, download=True)
+                        filename = DownloadManager.get_safe_filename(info.get('title', 'video'))
+                    
+                    # Success - update progress
+                    downloads[download_id].update({
+                        'status': 'completed',
+                        'progress': 100,
+                        'message': 'Download complete',
+                        'filename': f"{filename}.mp4",
+                        'completion_time': time.time()
+                    })
+                    
+                    logger.info(f"Download completed: {download_id}")
+                    return
+                    
+                except Exception as e:
+                    if attempt < 2:  # Not the last attempt
+                        logger.warning(f"Download attempt {attempt + 1} failed: {str(e)[:100]}")
+                        time.sleep(random.uniform(5, 10))
+                        continue
+                    else:
+                        raise e
+                        
         except Exception as e:
             logger.error(f"Download error for {download_id}: {str(e)}")
             downloads[download_id].update({
@@ -374,9 +402,9 @@ def get_file(download_id):
             mimetype='video/mp4'
         )
         
-        # Schedule cleanup after 5 minutes
+        # Schedule cleanup after 10 minutes
         def cleanup():
-            time.sleep(300)
+            time.sleep(600)
             if download_id in downloads:
                 file_to_remove = downloads[download_id].get('file_path')
                 if file_to_remove and os.path.exists(file_to_remove):
@@ -394,57 +422,6 @@ def get_file(download_id):
     except Exception as e:
         logger.error(f"Get file error: {str(e)}")
         return jsonify({'error': str(e)}), 500
-
-@app.route('/status')
-def status():
-    """API status endpoint"""
-    return jsonify({
-        'status': 'ok',
-        'timestamp': datetime.now().isoformat(),
-        'active_downloads': len([d for d in downloads.values() if d['status'] == 'downloading']),
-        'total_downloads': len(downloads)
-    })
-
-@app.route('/cleanup', methods=['POST'])
-def cleanup_old():
-    """Cleanup old downloads"""
-    try:
-        now = time.time()
-        deleted_files = 0
-        deleted_entries = 0
-        
-        for download_id in list(downloads.keys()):
-            download_info = downloads[download_id]
-            file_path = download_info.get('file_path')
-            
-            # Check if entry is old
-            entry_age = now - download_info.get('start_time', now)
-            
-            # Delete files older than 30 minutes
-            if file_path and os.path.exists(file_path) and entry_age > 1800:
-                try:
-                    os.unlink(file_path)
-                    deleted_files += 1
-                except:
-                    pass
-            
-            # Remove entries older than 1 hour
-            if entry_age > 3600:
-                if download_id in downloads:
-                    del downloads[download_id]
-                    deleted_entries += 1
-        
-        return jsonify({
-            'success': True,
-            'deleted_files': deleted_files,
-            'deleted_entries': deleted_entries,
-            'remaining_downloads': len(downloads)
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-# ==================== START APP ====================
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
