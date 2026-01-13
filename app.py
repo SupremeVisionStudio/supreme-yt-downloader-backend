@@ -131,22 +131,26 @@ def get_video_info_with_retry(url):
 
 @app.route("/")
 def home():
-    """API home endpoint - returns JSON instead of rendering template"""
+    """API home endpoint"""
     return jsonify({
         "service": "YouTube Downloader API",
         "status": "running",
         "version": "1.0.0",
         "timestamp": datetime.now().isoformat(),
         "endpoints": {
-            "/get_info": "POST - Get video information",
-            "/start_download": "POST - Start a download",
+            "/info": "POST - Get video information",
+            "/download": "POST - Start a download",
             "/progress/<id>": "GET - Get download progress",
-            "/download_file/<id>": "GET - Download completed file",
-            "/cancel_download/<id>": "POST - Cancel download",
-            "/health": "GET - Health check"
+            "/get_file/<id>": "GET - Download completed file",
+            "/cancel/<id>": "POST - Cancel download",
+            "/health": "GET - Health check",
+            "/cleanup": "POST - Cleanup old downloads"
         }
     })
 
+# ==================== VIDEO INFO ENDPOINTS ====================
+
+@app.route("/info", methods=["POST"])
 @app.route("/get_info", methods=["POST"])
 def get_video_info():
     """Get video information and available formats"""
@@ -193,6 +197,7 @@ def get_video_info():
             pass
         
         video_info = {
+            'success': True,
             'title': info.get('title', 'Unknown'),
             'thumbnail': info.get('thumbnail', ''),
             'duration': info.get('duration', 0),
@@ -209,8 +214,16 @@ def get_video_info():
     except Exception as e:
         error_msg = str(e)
         if "Failed to extract any player response" in error_msg:
-            return jsonify({"error": "YouTube is blocking this request. Try updating yt-dlp or try again later."}), 500
-        return jsonify({"error": f"Failed to get video info: {error_msg}"}), 500
+            return jsonify({
+                "success": False,
+                "error": "YouTube is blocking this request. Try updating yt-dlp or try again later."
+            }), 500
+        return jsonify({
+            "success": False,
+            "error": f"Failed to get video info: {error_msg}"
+        }), 500
+
+# ==================== DOWNLOAD ENDPOINTS ====================
 
 def download_progress_hook(d, download_id):
     """Progress hook for yt-dlp"""
@@ -264,10 +277,6 @@ def download_video_thread(url, quality, download_id, filename=None):
             'quiet': True,
             'no_warnings': True,
             'merge_output_format': 'mp4',
-            'postprocessors': [{
-                'key': 'FFmpegVideoConvertor',
-                'preferedformat': 'mp4',
-            }],
             
             # Anti-bot measures for download
             'http_headers': {
@@ -362,19 +371,21 @@ def download_video_thread(url, quality, download_id, filename=None):
         
         threading.Thread(target=cleanup).start()
 
+@app.route("/download", methods=["POST"])
 @app.route("/start_download", methods=["POST"])
 def start_download():
     """Start a download and return download ID"""
     try:
         data = request.json
         if not data:
-            return jsonify({"error": "No data provided"}), 400
+            return jsonify({"success": False, "error": "No data provided"}), 400
             
         url = data.get("url", "").strip()
-        quality = data.get("quality", "best")
+        format_id = data.get("format_id", "best")
+        quality = data.get("quality", format_id)  # Support both format_id and quality
         
         if not url:
-            return jsonify({"error": "URL is required"}), 400
+            return jsonify({"success": False, "error": "URL is required"}), 400
         
         # Generate unique download ID
         import uuid
@@ -399,40 +410,39 @@ def start_download():
         })
         
     except Exception as e:
-        return jsonify({"error": f"Failed to start download: {str(e)}"}), 500
+        return jsonify({"success": False, "error": f"Failed to start download: {str(e)}"}), 500
 
 @app.route("/progress/<download_id>")
 def get_progress(download_id):
     """Get current download progress"""
-    def generate():
-        while True:
-            if download_id in active_downloads:
-                progress = active_downloads[download_id]
-                
-                progress_data = {
-                    "status": progress.status,
-                    "progress": progress.progress,
-                    "message": progress.message,
-                    "current_step": progress.current_step,
-                    "title": progress.title,
-                    "size": progress.size,
-                    "error": progress.error,
-                    "download_id": download_id
-                }
-                
-                if progress.status in ["completed", "error"]:
-                    progress_data["file_path"] = progress.file_path
-                    yield f"data: {json.dumps(progress_data)}\n\n"
-                    break
-                
-                yield f"data: {json.dumps(progress_data)}\n\n"
-            
-            time.sleep(1)  # Update every second
+    if download_id not in active_downloads:
+        return jsonify({
+            "status": "not_found",
+            "progress": 0,
+            "message": "Download not found"
+        }), 404
     
-    return Response(generate(), mimetype="text/event-stream")
+    progress = active_downloads[download_id]
+    
+    progress_data = {
+        "status": progress.status,
+        "progress": progress.progress,
+        "message": progress.message,
+        "current_step": progress.current_step,
+        "title": progress.title,
+        "size": progress.size,
+        "error": progress.error,
+        "download_id": download_id
+    }
+    
+    if progress.status in ["completed", "error"]:
+        progress_data["file_path"] = progress.file_path
+    
+    return jsonify(progress_data)
 
+@app.route("/get_file/<download_id>")
 @app.route("/download_file/<download_id>")
-def download_file(download_id):
+def get_file(download_id):
     """Download the completed file"""
     if download_id not in active_downloads:
         return jsonify({"error": "Download not found or expired"}), 404
@@ -452,6 +462,7 @@ def download_file(download_id):
         download_name=f"{progress.title}.mp4"
     )
 
+@app.route("/cancel/<download_id>", methods=["POST"])
 @app.route("/cancel_download/<download_id>", methods=["POST"])
 def cancel_download(download_id):
     """Cancel an ongoing download"""
@@ -461,6 +472,8 @@ def cancel_download(download_id):
         return jsonify({"success": True, "message": "Download cancelled"})
     
     return jsonify({"error": "Download not found"}), 404
+
+# ==================== UTILITY ENDPOINTS ====================
 
 @app.route("/health")
 def health_check():
