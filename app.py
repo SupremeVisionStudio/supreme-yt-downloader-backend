@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template, Response, send_file
+from flask import Flask, request, jsonify, Response, send_file
 from flask_cors import CORS
 import yt_dlp
 import os
@@ -48,6 +48,8 @@ def get_random_user_agent():
 
 def format_size(bytes_size):
     """Convert bytes to human readable format"""
+    if not bytes_size:
+        return "0 B"
     for unit in ['B', 'KB', 'MB', 'GB']:
         if bytes_size < 1024.0:
             return f"{bytes_size:.2f} {unit}"
@@ -129,22 +131,39 @@ def get_video_info_with_retry(url):
 
 @app.route("/")
 def home():
-    return render_template("index.html")
+    """API home endpoint - returns JSON instead of rendering template"""
+    return jsonify({
+        "service": "YouTube Downloader API",
+        "status": "running",
+        "version": "1.0.0",
+        "timestamp": datetime.now().isoformat(),
+        "endpoints": {
+            "/get_info": "POST - Get video information",
+            "/start_download": "POST - Start a download",
+            "/progress/<id>": "GET - Get download progress",
+            "/download_file/<id>": "GET - Download completed file",
+            "/cancel_download/<id>": "POST - Cancel download",
+            "/health": "GET - Health check"
+        }
+    })
 
 @app.route("/get_info", methods=["POST"])
 def get_video_info():
     """Get video information and available formats"""
     try:
         data = request.json
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+            
         url = data.get("url", "").strip()
         
         if not url:
-            return jsonify({"error": "Please provide a YouTube URL"})
+            return jsonify({"error": "Please provide a YouTube URL"}), 400
         
         # Validate YouTube URL
         youtube_regex = r'(https?://)?(www\.)?(youtube|youtu|youtube-nocookie)\.(com|be)/'
         if not re.match(youtube_regex, url):
-            return jsonify({"error": "Please enter a valid YouTube URL"})
+            return jsonify({"error": "Please enter a valid YouTube URL"}), 400
         
         # Get video info with retry logic
         info = get_video_info_with_retry(url)
@@ -164,10 +183,14 @@ def get_video_info():
                 formats.append(format_info)
         
         # Sort formats by quality (highest first)
-        formats.sort(key=lambda x: (
-            0 if 'p' in str(x['quality']) else 1,
-            int(re.search(r'\d+', str(x['quality'])).group()) if re.search(r'\d+', str(x['quality'])) else 0
-        ), reverse=True)
+        try:
+            formats.sort(key=lambda x: (
+                0 if 'p' in str(x['quality']) else 1,
+                int(re.search(r'\d+', str(x['quality'])).group()) if re.search(r'\d+', str(x['quality'])) else 0
+            ), reverse=True)
+        except:
+            # If sorting fails, keep original order
+            pass
         
         video_info = {
             'title': info.get('title', 'Unknown'),
@@ -177,7 +200,7 @@ def get_video_info():
             'uploader': info.get('uploader', 'Unknown'),
             'view_count': info.get('view_count', 0),
             'like_count': info.get('like_count', 0),
-            'formats': formats,
+            'formats': formats[:20],  # Limit to 20 formats
             'url': url
         }
         
@@ -186,8 +209,8 @@ def get_video_info():
     except Exception as e:
         error_msg = str(e)
         if "Failed to extract any player response" in error_msg:
-            return jsonify({"error": "YouTube is blocking this request. Try updating yt-dlp or try again later."})
-        return jsonify({"error": f"Failed to get video info: {error_msg}"})
+            return jsonify({"error": "YouTube is blocking this request. Try updating yt-dlp or try again later."}), 500
+        return jsonify({"error": f"Failed to get video info: {error_msg}"}), 500
 
 def download_progress_hook(d, download_id):
     """Progress hook for yt-dlp"""
@@ -344,11 +367,14 @@ def start_download():
     """Start a download and return download ID"""
     try:
         data = request.json
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+            
         url = data.get("url", "").strip()
         quality = data.get("quality", "best")
         
         if not url:
-            return jsonify({"error": "URL is required"})
+            return jsonify({"error": "URL is required"}), 400
         
         # Generate unique download ID
         import uuid
@@ -373,7 +399,7 @@ def start_download():
         })
         
     except Exception as e:
-        return jsonify({"error": f"Failed to start download: {str(e)}"})
+        return jsonify({"error": f"Failed to start download: {str(e)}"}), 500
 
 @app.route("/progress/<download_id>")
 def get_progress(download_id):
@@ -444,6 +470,35 @@ def health_check():
         "timestamp": datetime.now().isoformat(),
         "active_downloads": len([p for p in active_downloads.values() if p.status == "downloading"])
     })
+
+@app.route("/cleanup", methods=["POST"])
+def cleanup():
+    """Manual cleanup endpoint"""
+    try:
+        now = time.time()
+        cleaned = 0
+        
+        for download_id in list(active_downloads.keys()):
+            progress = active_downloads[download_id]
+            
+            # Clean up old downloads (older than 1 hour)
+            if progress.start_time and (now - progress.start_time.timestamp() > 3600):
+                if progress.file_path and os.path.exists(progress.file_path):
+                    try:
+                        os.remove(progress.file_path)
+                    except:
+                        pass
+                del active_downloads[download_id]
+                cleaned += 1
+        
+        return jsonify({
+            "success": True,
+            "cleaned": cleaned,
+            "remaining": len(active_downloads)
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 5000))
