@@ -1,3 +1,3 @@
 Flask
 Flask-CORS
-yt-dlp
+yt-dlp>=2026.1.1  # Or use: yt-dlp@git+https://github.com/yt-dlp/yt-dlp.git
