@@ -57,7 +57,7 @@ class DownloadManager:
                     'duration': info.get('duration', 0),
                     'uploader': info.get('uploader', 'Unknown'),
                     'view_count': info.get('view_count', 0),
-                    'formats': formats[:10]  # Limit to 10 formats
+                    'formats': formats[:10]
                 }
                 
         except Exception as e:
@@ -88,21 +88,18 @@ class DownloadManager:
         """Create safe filename from title"""
         if not title:
             return "youtube_video"
-        # Remove invalid characters
         safe = re.sub(r'[^\w\s-]', '', title)
         safe = re.sub(r'[-\s]+', '_', safe)
-        return safe[:100]  # Limit length
+        return safe[:100]
     
     @staticmethod
     def download_video(url, format_id, download_id):
         """Download video in background thread"""
         try:
-            # Create temporary file
             temp_file = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False)
             temp_path = temp_file.name
             temp_file.close()
             
-            # Initialize progress
             downloads[download_id] = {
                 'status': 'downloading',
                 'progress': 0,
@@ -112,19 +109,17 @@ class DownloadManager:
                 'error': None
             }
             
-            # Progress hook
             def progress_hook(d):
                 if d['status'] == 'downloading':
                     downloaded = d.get('downloaded_bytes', 0)
                     total = d.get('total_bytes', 0) or d.get('total_bytes_estimate', 1)
                     progress = int((downloaded / total) * 100) if total > 0 else 0
-                    downloads[download_id]['progress'] = min(95, progress)  # Cap at 95%
+                    downloads[download_id]['progress'] = min(95, progress)
                     speed = d.get('speed', 0)
                     if speed:
                         speed_str = DownloadManager.format_size(speed)
                         downloads[download_id]['message'] = f"Downloading... {speed_str}/s"
             
-            # Download options
             ydl_opts = {
                 'format': format_id,
                 'outtmpl': temp_path,
@@ -134,12 +129,10 @@ class DownloadManager:
                 'merge_output_format': 'mp4',
             }
             
-            # Download
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
                 filename = DownloadManager.get_safe_filename(info.get('title', 'video'))
             
-            # Update progress
             downloads[download_id].update({
                 'status': 'completed',
                 'progress': 100,
@@ -157,7 +150,6 @@ class DownloadManager:
                 'message': f'Error: {str(e)}'
             })
             
-            # Cleanup temp file on error
             if 'file_path' in downloads[download_id]:
                 try:
                     os.unlink(downloads[download_id]['file_path'])
@@ -186,7 +178,6 @@ def get_info():
         if not url:
             return jsonify({'success': False, 'error': 'URL is required'})
         
-        # Validate YouTube URL
         youtube_patterns = [
             r'^(https?://)?(www\.)?youtube\.com/watch\?v=[\w-]{11}',
             r'^(https?://)?youtu\.be/[\w-]{11}'
@@ -216,11 +207,9 @@ def start_download():
         if not url:
             return jsonify({'success': False, 'error': 'URL is required'})
         
-        # Generate download ID
         import uuid
         download_id = str(uuid.uuid4())[:8]
         
-        # Start download in background thread
         thread = threading.Thread(
             target=DownloadManager.download_video,
             args=(url, format_id, download_id)
@@ -268,7 +257,6 @@ def get_file(download_id):
         if not file_path or not os.path.exists(file_path):
             return jsonify({'error': 'File not found'}), 404
         
-        # Send file
         response = send_file(
             file_path,
             as_attachment=True,
@@ -276,9 +264,8 @@ def get_file(download_id):
             mimetype='video/mp4'
         )
         
-        # Schedule cleanup after 5 minutes
         def cleanup():
-            time.sleep(300)  # 5 minutes
+            time.sleep(300)
             if download_id in downloads:
                 file_to_remove = downloads[download_id].get('file_path')
                 if file_to_remove and os.path.exists(file_to_remove):
@@ -296,44 +283,6 @@ def get_file(download_id):
     except Exception as e:
         logger.error(f"Get file error: {str(e)}")
         return jsonify({'error': str(e)}), 500
-
-@app.route('/cleanup', methods=['POST'])
-def cleanup_old():
-    """Cleanup old downloads (admin endpoint)"""
-    try:
-        now = time.time()
-        deleted = 0
-        
-        for download_id in list(downloads.keys()):
-            download_info = downloads[download_id]
-            file_path = download_info.get('file_path')
-            
-            # Delete files older than 1 hour
-            if file_path and os.path.exists(file_path):
-                file_age = now - os.path.getmtime(file_path)
-                if file_age > 3600:  # 1 hour
-                    try:
-                        os.unlink(file_path)
-                        deleted += 1
-                    except:
-                        pass
-            
-            # Remove completed/error entries older than 2 hours
-            if download_info['status'] in ['completed', 'error']:
-                entry_age = now - os.path.getctime(file_path) if file_path and os.path.exists(file_path) else 0
-                if entry_age > 7200:  # 2 hours
-                    del downloads[download_id]
-        
-        return jsonify({
-            'success': True,
-            'deleted_files': deleted,
-            'remaining_downloads': len(downloads)
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-# ==================== START APP ====================
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
